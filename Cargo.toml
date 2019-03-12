@@ -1,0 +1,12 @@
+[package]
+name = "wikiparse"
+version = "0.1.0"
+authors = [ "Doug Hanley <thesecretaryofwar@gmail.com>" ]
+
+[dependencies]
+bzip2 = "0.3.2"
+quick-xml = "0.13.3"
+
+[[bin]]
+name = "wikiparse"
+path = "wikiparse.rs"
