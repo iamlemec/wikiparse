@@ -9,9 +9,9 @@ from lxml import etree
 
 # parse input arguments
 parser = argparse.ArgumentParser(description='Extract desired page ids from wiki XML.')
-parser.add_argument('--input', type=str, help='wiki xml source file')
-parser.add_argument('--output', type=str, help='wiki xml output file')
-parser.add_argument('--pages', type=str, help='csv of page ids')
+parser.add_argument('input', type=str, help='wiki xml source file')
+parser.add_argument('--output', type=str, default=None, help='wiki xml output file')
+parser.add_argument('--pages', type=str, default=None, help='csv of page ids')
 parser.add_argument('--log', type=int, default=None, help='log file name')
 args = parser.parse_args()
 
@@ -21,26 +21,31 @@ wiki_footer = b'</mediawiki>'
 namespace = '{http://www.mediawiki.org/xml/export-0.10/}'
 page_tag = namespace + 'page'
 id_tag = namespace + 'id'
-
-df_pages = pd.read_csv(args.pages)
-pages = list(df_pages['article'])
+title_tag = namespace + 'title'
 
 fin = bz2.open(args.input, 'r')
-fout = open(args.output, 'wb+')
-fout.write(wiki_header+b'\n')
+
+fout = open(args.output, 'wb+') if args.output is not None else None
+if fout:
+    fout.write(wiki_header+b'\n')
 
 flog = open(args.log, 'a+', 1) if args.log is not None else sys.stdout
 flog.write(f'{args.input}\n')
+
+pages = list(pd.read_csv(args.pages)['article']) if args.pages is not None else None
 
 art_tot = 0
 hit_tot = 0
 try:
     for event, elem in etree.iterparse(fin, tag=page_tag, events=['end'], recover=True):
         id = int(elem.find(id_tag).text)
-        if id in pages:
+        if pages is None or id in pages:
             hit_tot += 1
             try:
-                etree.ElementTree(elem).write(fout, encoding='UTF-8', pretty_print=True)
+                if fout:
+                    etree.ElementTree(elem).write(fout, encoding='UTF-8', pretty_print=True)
+                else:
+                    print(elem.find(title_tag).text)
             except Exception as err:
                 flog.write(f'{err}\n')
                 flog.write(f'failed to write {id}, line {elem.sourceline}\n')

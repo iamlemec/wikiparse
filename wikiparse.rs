@@ -12,6 +12,8 @@ use bzip2::read::BzDecoder;
 use quick_xml::Reader;
 use quick_xml::events::Event;
 
+/* just cat out data */
+
 fn cat(fname_inp: &String) {
     let path = Path::new(fname_inp);
     let display = path.display();
@@ -22,12 +24,18 @@ fn cat(fname_inp: &String) {
     };
 
     let bz2_reader = BzDecoder::new(file);
-    let mut buf_reader = BufReader::new(bz2_reader);
+    let buf_reader = BufReader::new(bz2_reader);
 
+    let mut total = 0;
     for line in buf_reader.lines() {
-        println!("{}", line.unwrap());
+        total += line.unwrap().len() + 1;
+        // println!("{}", line.unwrap());
     }
+
+    println!("Total: {}", total);
 }
+
+/* interpret pages */
 
 fn parse(fname_inp: &String) {
     let path = Path::new(fname_inp);
@@ -63,8 +71,10 @@ fn parse(fname_inp: &String) {
                     }
                     _ => (),
                 }
+                /*
                 let text = String::from_utf8(e.name().to_vec()).unwrap();
                 println!("Start element: {}", text);
+                */
             },
             Ok(Event::End(ref e)) => {
                 match e.name() {
@@ -77,19 +87,24 @@ fn parse(fname_inp: &String) {
                     }
                     _ => (),
                 }
+                /*
                 let text = String::from_utf8(e.name().to_vec()).unwrap();
                 println!("End element: {}", text);
+                */
             },
             Ok(Event::Text(e)) => {
-                // if inpage && intitle {
-                // }
-                let text = String::from_utf8(e.escaped().to_vec()).unwrap();
-                println!("Text element: {}", text);
+                if inpage && intitle {
+                    let text = String::from_utf8(e.escaped().to_vec()).unwrap();
+                    let pos = reader.buffer_position();
+                    println!("{}: {}", pos, text);
+                }
             },
             Ok(Event::Eof) => break, // exits the loop when reaching end of file
             Ok(Event::Empty(e)) => {
+                /*
                 let text = e.unescape_and_decode(&reader).unwrap();
                 println!("Empty event: {}", text);
+                */
             }
             Err(e) => panic!("Error at position {}: {:?}", reader.buffer_position(), e),
             e => println!("Unknown event {:?}", e), // There are several other `Event`s we do not consider here
@@ -99,6 +114,7 @@ fn parse(fname_inp: &String) {
         buf.clear();
     }
 
+    println!("Position: {:}", reader.buffer_position());
     println!("{}", total);
 }
 
