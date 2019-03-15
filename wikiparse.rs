@@ -11,7 +11,16 @@ use bzip2::read::BzDecoder;
 use quick_xml::Reader;
 use quick_xml::events::Event;
 
-/* interpret pages */
+#[derive(PartialEq, Eq, Copy, Debug, Clone)]
+pub enum State {
+    Null,
+    Wiki,
+    Page,
+    Title,
+    Id,
+    Revision,
+    Text,
+}
 
 fn parse(fname_inp: &String) {
     let path = Path::new(fname_inp);
@@ -28,10 +37,7 @@ fn parse(fname_inp: &String) {
     reader.trim_text(true);
 
     let mut total = 0;
-    let mut inpage = false;
-    let mut intitle = false;
-
-    // let mut txt = Vec::new();
+    let mut state = State::Null;
     let mut buf = Vec::new();
 
     // The `Reader` does not implement `Iterator` because it outputs borrowed data (`Cow`s)
@@ -39,58 +45,103 @@ fn parse(fname_inp: &String) {
         match reader.read_event(&mut buf) {
             Ok(Event::Start(ref e)) => {
                 match e.name() {
-                    b"page" => {
-                        inpage = true;
-                    },
-                    b"title" => {
-                        intitle = true;
+                    b"mediawiki" => {
+                        if state == State::Null {
+                            state = State::Wiki;
+                        }
                     }
-                    _ => (),
+                    b"page" => {
+                        if state == State::Wiki {
+                            state = State::Page;
+                        }
+                    },
+                    b"id" => {
+                        if state == State::Page {
+                            state = State::Id;
+                        }
+                    }
+                    b"title" => {
+                        if state == State::Page {
+                            state = State::Title;
+                        }
+                    },
+                    b"revision" => {
+                        if state == State::Page {
+                            state = State::Revision;
+                        }
+                    },
+                    tag => {
+                        if state == State::Revision {
+                            // let text = e.unescape_and_decode(&reader).unwrap();
+                            let text = String::from_utf8(tag.to_vec()).unwrap();
+                            print!("<{}>", text);
+                        }
+                    },
                 }
-                /*
-                let text = String::from_utf8(e.name().to_vec()).unwrap();
-                println!("Start element: {}", text);
-                */
             },
             Ok(Event::End(ref e)) => {
                 match e.name() {
-                    b"page" => {
-                        inpage = false;
-                        total += 1;
-                    },
-                    b"title" => {
-                        intitle = false;
+                    b"mediawiki" => {
+                        if state == State::Wiki {
+                            state = State::Null;
+                        }
                     }
-                    _ => (),
+                    b"page" => {
+                        if state == State::Page {
+                            state = State::Wiki;
+                            total += 1;
+                        }
+                    },
+                    b"id" => {
+                        if state == State::Id {
+                            state = State::Page;
+                        }
+                    }
+                    b"title" => {
+                        if state == State::Title {
+                            state = State::Page;
+                        }
+                    },
+                    b"revision" => {
+                        if state == State::Revision {
+                            state = State::Page;
+                        }
+                    },
+                    tag => {
+                        if state == State::Revision {
+                            let text = String::from_utf8(tag.to_vec()).unwrap();
+                            print!("</{}>\n", text);
+                        }
+                    },
                 }
-                /*
-                let text = String::from_utf8(e.name().to_vec()).unwrap();
-                println!("End element: {}", text);
-                */
             },
             Ok(Event::Text(e)) => {
-                if inpage && intitle {
-                    let text = String::from_utf8(e.escaped().to_vec()).unwrap();
-                    let pos = reader.buffer_position();
-                    println!("{}: {}", pos, text);
+                match state {
+                    State::Title => {
+                        let text = e.unescape_and_decode(&reader).unwrap();
+                        println!("Title: {}", text);
+                    },
+                    State::Id => {
+                        let text = e.unescape_and_decode(&reader).unwrap();
+                        println!("Id: {}", text);
+                    },
+                    _ => {
+                        if state == State::Revision {
+                            let text = e.unescape_and_decode(&reader).unwrap();
+                            print!("{}", text);
+                        }
+                    },
                 }
             },
             Ok(Event::Eof) => break, // exits the loop when reaching end of file
-            Ok(Event::Empty(_)) => {
-                /*
-                let text = e.unescape_and_decode(&reader).unwrap();
-                println!("Empty event: {}", text);
-                */
-            }
             Err(e) => panic!("Error at position {}: {:?}", reader.buffer_position(), e),
-            e => println!("Unknown event {:?}", e), // There are several other `Event`s we do not consider here
+            _ => (),
         }
 
         // if we don't keep a borrow elsewhere, we can clear the buffer to keep memory usage low
         buf.clear();
     }
 
-    println!("Position: {:}", reader.buffer_position());
     println!("{}", total);
 }
 
