@@ -4,9 +4,14 @@ version = "0.1.0"
 authors = [ "Doug Hanley <thesecretaryofwar@gmail.com>" ]
 
 [dependencies]
-bzip2 = "0.3.2"
+# bzip2 = "0.3.2"
+bzip2 = { path = "/home/doug/code/bzip2-rs" }
 quick-xml = "0.13.3"
 
 [[bin]]
 name = "wikiparse"
 path = "wikiparse.rs"
+
+[[bin]]
+name = "bz2test"
+path = "bz2test.rs"
