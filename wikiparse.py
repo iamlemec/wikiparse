@@ -3,6 +3,7 @@
 
 import sys
 import bz2
+import time
 import argparse
 import pandas as pd
 from lxml import etree
@@ -30,12 +31,15 @@ if fout:
     fout.write(wiki_header+b'\n')
 
 flog = open(args.log, 'a+', 1) if args.log is not None else sys.stdout
-flog.write(f'{args.input}\n')
+flog.write(f'{args.input} -> {args.output}\n')
 
 pages = list(pd.read_csv(args.pages)['article']) if args.pages is not None else None
 
+
 art_tot = 0
 hit_tot = 0
+time0 = time.time()
+
 try:
     for event, elem in etree.iterparse(fin, tag=page_tag, events=['end'], recover=True):
         id = int(elem.find(id_tag).text)
@@ -52,7 +56,8 @@ try:
 
         art_tot += 1
         if art_tot % 50 == 0:
-            flog.write(f'articles {art_tot}, matches {hit_tot}, id {id}, line {elem.sourceline}\n')
+            time1 = time.time()
+            flog.write(f'articles {art_tot}, matches {hit_tot}, id {id}, time {time1-time0}\n')
 
         elem.clear()
         while elem.getprevious() is not None:

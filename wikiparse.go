@@ -7,33 +7,17 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"bufio"
 	"strconv"
     "time"
+	"flag"
+	"log"
 )
-
-// SiteInfo is the toplevel site info describing basic dump properties.
-type SiteInfo struct {
-	SiteName   string `xml:"sitename"`
-	Base       string `xml:"base"`
-	Generator  string `xml:"generator"`
-	Case       string `xml:"case"`
-	Namespaces []struct {
-		Key   string `xml:"key,attr"`
-		Case  string `xml:"case,attr"`
-		Value string `xml:",chardata"`
-	} `xml:"namespaces>namespace"`
-	Inner	  string     `xml:",innerxml"`
-}
 
 // A Page in the wiki.
 type Page struct {
 	Title     string     `xml:"title"`
 	ID        uint64     `xml:"id"`
-	// Redir     Redirect   `xml:"redirect"`
-	// Revisions []Revision `xml:"revision"`
 	Ns        uint64     `xml:"ns"`
-	// Inner	  string     `xml:",innerxml"`
 }
 
 // Generic text
@@ -56,11 +40,11 @@ func ParseUint64(num string) uint64 {
   	return x
 }
 
-func parse(inp_fname string, out_fname string, id_list map[uint64]bool) (error) {
+func parse(inp_fname string, out_fname string, id_list map[uint64]bool, limit int) (error) {
 	// open input file for reading
 	finp, err := os.Open(inp_fname)
 	if err != nil {
-		fmt.Println("Input XML file not found")
+		log.Fatal("Input XML file not found: ", err)
 		return err
 	}
 	defer finp.Close()
@@ -72,33 +56,21 @@ func parse(inp_fname string, out_fname string, id_list map[uint64]bool) (error) 
 	// open output file for writing
 	fout, err := os.Create(out_fname)
 	if err != nil {
+		log.Fatal("Couldn't create output file: ", err)
 		return err
 	}
 	defer fout.Close()
 
-	// construct buffered writer
-	buf := bufio.NewWriter(fout)
+	// parse header info
+	dec.Token() // read mediawiki
+	site := Elem{} // store siteinfo
+	dec.Decode(&site) // read siteinfo
 
-	// start root tag
-	buf.WriteString("<mediawiki>\n")
-
-	// parse opening mediawiki tag
-	_, err = dec.Token()
-	if err != nil {
-		return err
-	}
-
-	// get siteinfo struct
-	si := SiteInfo{}
-	err = dec.Decode(&si)
-	if err != nil {
-		return err
-	}
-
-	// store siteinfo in output
-	buf.WriteString("  <siteinfo>")
-	buf.WriteString(si.Inner);
-	buf.WriteString("</siteinfo>\n")
+	// write header info
+	fout.WriteString("<mediawiki>\n")
+	fout.WriteString("  <siteinfo>")
+	fout.WriteString(site.Inner);
+	fout.WriteString("</siteinfo>\n")
 
   	// get zero time
   	time0 := time.Now().Unix()
@@ -106,21 +78,33 @@ func parse(inp_fname string, out_fname string, id_list map[uint64]bool) (error) 
   	// init memory
   	page := &Page{}
 	start := false
+	done := false
 	total := 0
 	hits := 0
 
-  	// get all pages
+  	// parse all pages
 	for {
+		if done {
+			fout.WriteString("</mediawiki>\n")
+			break
+		}
+
 		tok, err := dec.Token()
     	if err == io.EOF {
       		break
     	}
+
     	switch tag := tok.(type) {
     	case xml.StartElement:
       		switch tag.Name.Local {
       		case "page":
         		page = &Page{}
 				start = false
+
+				// limit parsing
+				if limit > 0 && total >= limit {
+					done = true
+				}
       		case "title":
         		page.Title = GetInner(dec, &tag)
       		case "ns":
@@ -140,31 +124,29 @@ func parse(inp_fname string, out_fname string, id_list map[uint64]bool) (error) 
 				// article match
 				if id_list[page.ID] {
 					hits += 1
+					fmt.Printf("%s\n", page.Title)
 				} else {
 					dec.Skip()
 				}
 			case "revision":
 				if !start {
-					buf.WriteString("  <page>\n")
-					fmt.Fprintf(buf, "    <title>%s</title>\n", page.Title)
-					fmt.Fprintf(buf, "    <ns>%d</ns>\n", page.Ns)
-					fmt.Fprintf(buf, "    <id>%d</id>\n", page.ID)
+					fmt.Fprintf(fout, "  <page>\n    <title>%s</title>\n    <ns>%d</ns>\n    <id>%d</id>\n", page.Title, page.Ns, page.ID)
 				}
 				start = true
 
 				inner := GetInner(dec, &tag)
-				buf.WriteString("    <revision>")
-				buf.WriteString(inner)
-				buf.WriteString("</revision>\n")
+				fout.WriteString("    <revision>")
+				fout.WriteString(inner)
+				fout.WriteString("</revision>\n")
       		default:
         		dec.Skip()
       		}
     	case xml.EndElement:
       		switch tag.Name.Local {
       		case "page":
-				buf.WriteString("  </page>\n")
+				fout.WriteString("  </page>\n")
       		case "mediawiki":
-				buf.WriteString("</mediawiki>\n")
+				done = true
       		}
     	}
   	}
@@ -175,27 +157,20 @@ func parse(inp_fname string, out_fname string, id_list map[uint64]bool) (error) 
 
 // read in ids as a bool map
 func readlist(fname string) (map[uint64]bool) {
-	f, _ := os.Open(fname)
-	b := bufio.NewReader(f)
-	r := csv.NewReader(b)
-
-	ids := map[uint64]bool{}
-
-	_, err := r.Read() // clear header
+	f, err := os.Open(fname)
 	if err != nil {
-		fmt.Println("No data found")
-		return ids
+		log.Fatal("Article file not found")
 	}
 
+	r := csv.NewReader(f)
+	r.Read() // clear header
+
+	ids := map[uint64]bool{}
 	for {
 		rec, err := r.Read()
 		if err == io.EOF {
 			break
-		} else if err != nil {
-			fmt.Println("Error reading data")
-			break
 		}
-
 		if len(rec) > 0 {
 			i := ParseUint64(rec[0])
 			ids[i] = true
@@ -206,10 +181,12 @@ func readlist(fname string) (map[uint64]bool) {
 }
 
 func main() {
-	inp_fname := os.Args[1]
-	out_fname := os.Args[2]
-	id_fname := os.Args[3]
+	var inp_fname = flag.String("input", "", "input filename (bz2)")
+	var out_fname = flag.String("output", "", "output filename (xml)")
+	var id_fname = flag.String("articles", "", "articles filename (csv)")
+	var limit = flag.Int("limit", 0, "limit number of pages")
+	flag.Parse()
 
-	id_list := readlist(id_fname)
-	parse(inp_fname, out_fname, id_list)
+	id_list := readlist(*id_fname)
+	parse(*inp_fname, *out_fname, id_list, *limit)
 }
