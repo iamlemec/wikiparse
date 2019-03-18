@@ -5,7 +5,6 @@ use std::env;
 use std::fs::File;
 use std::io::Write;
 use std::io::BufReader;
-use std::io::BufRead;
 use std::path::Path;
 use std::time::Instant;
 
@@ -27,30 +26,6 @@ struct Page {
     title: String,
     ns: u64,
     id: u64,
-}
-
-/// Reads until end element is found consuming text as we go
-/// Manages nested cases where parent and child elements have the same name
-fn store_to_end<B: BufRead, K: AsRef<[u8]>>(reader: &mut Reader<B>, end: K, buf: &mut Vec<u8>) -> Result<(), String> {
-    let mut depth = 0;
-    let end = end.as_ref();
-    loop {
-        let pos = buf.len();
-        match reader.read_event(&mut buf[pos..].to_vec()) {
-            Ok(Event::End(ref e)) if e.name() == end => {
-                if depth == 0 {
-                    return Ok(());
-                }
-                depth -= 1;
-            },
-            Ok(Event::Start(ref e)) if e.name() == end => depth += 1,
-            Ok(Event::Eof) => {
-                return panic!("Expected </{:?}>", String::from_utf8(end.to_vec()));
-            },
-            Err(e) => panic!("Parsing error: {:?}", e),
-            _ => (),
-        }
-    }
 }
 
 fn parse(fname_inp: &String, fname_out: &String) {
@@ -112,8 +87,8 @@ fn parse(fname_inp: &String, fname_out: &String) {
                 page.id = text.parse::<u64>().unwrap();
                 total += 1;
                 if total % 50 == 0 {
-                    let dur = then.elapsed();
-                    println!("articles {}, matches {}, id {}, time {:?}", total, hits, page.id, dur);
+                    let dur = then.elapsed().as_secs();
+                    println!("articles {}, matches {}, id {}, time {}", total, hits, page.id, dur);
                 }
                 if page.id == 2336430 {
                     state = State::Write;
@@ -134,16 +109,23 @@ fn parse(fname_inp: &String, fname_out: &String) {
                 println!("{}: {}", hits, page.title);
             },
             (State::Write, Ok(Event::Start(e))) => {
-                txt.clear();
-                store_to_end(&mut reader, e.name(), &mut txt).unwrap();
                 let tag = String::from_utf8(e.name().to_vec()).unwrap();
-                let cont = String::from_utf8(txt.to_vec()).unwrap();
                 write!(file_out, "<{}>", tag).unwrap();
-                write!(file_out, "{}", cont).unwrap();
+                if tag == "revision" || tag == "contributor" {
+                    write!(file_out, "\n").unwrap();
+                }
             },
             (State::Write, Ok(Event::End(e))) => {
+                let tag = String::from_utf8(e.name().to_vec()).unwrap();
+                write!(file_out, "</{}>\n", tag).unwrap();
             },
             (State::Write, Ok(Event::Empty(e))) => {
+                let tag = String::from_utf8(e.name().to_vec()).unwrap();
+                write!(file_out, "<{} />\n", tag).unwrap();
+            },
+            (State::Write, Ok(Event::Text(e))) => {
+                let cont = e.unescape_and_decode(&reader).unwrap();
+                write!(file_out, "{}", cont).unwrap();
             },
 
             (State::Null, Ok(Event::Eof)) => break, // exits the loop when reaching end of file
