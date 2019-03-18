@@ -44,7 +44,6 @@ fn parse(fname_inp: &String, fname_out: &String) {
     let mut state = State::Null;
     let mut store = vec![];
 
-    // is there a leading tag?
     lazy_static! {
         static ref ISTAG: Regex = Regex::new(r" *<").unwrap(); // filter first since most lines are non-tags
         static ref GETTAG: Regex = Regex::new(r" *<(/?[^ >]+)(?: |>)").unwrap();
