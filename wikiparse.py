@@ -10,7 +10,7 @@ from lxml import etree
 
 # parse input arguments
 parser = argparse.ArgumentParser(description='Extract desired page ids from wiki XML.')
-parser.add_argument('input', type=str, help='wiki xml source file')
+parser.add_argument('--input', type=str, help='wiki xml source file')
 parser.add_argument('--output', type=str, default=None, help='wiki xml output file')
 parser.add_argument('--pages', type=str, default=None, help='csv of page ids')
 parser.add_argument('--log', type=int, default=None, help='log file name')
@@ -33,8 +33,7 @@ if fout:
 flog = open(args.log, 'a+', 1) if args.log is not None else sys.stdout
 flog.write(f'{args.input} -> {args.output}\n')
 
-pages = list(pd.read_csv(args.pages)['article']) if args.pages is not None else None
-
+pages = list(pd.read_csv(args.pages)['id']) if args.pages is not None else None
 
 art_tot = 0
 hit_tot = 0

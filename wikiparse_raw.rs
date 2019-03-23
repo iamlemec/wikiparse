@@ -1,8 +1,6 @@
-#[macro_use]
-extern crate lazy_static;
-
 extern crate bzip2;
 extern crate regex;
+extern crate csv;
 
 use std::env;
 use std::fs::File;
@@ -12,6 +10,7 @@ use std::io::BufWriter;
 use std::io::BufRead;
 use std::path::Path;
 use std::time::Instant;
+use std::collections::HashSet;
 
 use bzip2::read::BzDecoder;
 use regex::Regex;
@@ -26,7 +25,13 @@ pub enum State {
     Skip,
 }
 
-fn parse(fname_inp: &String, fname_out: &String) {
+fn get_match(reg: &Regex, text: &str) -> String {
+    let cap = reg.captures(text).unwrap();
+    let mat = cap.get(1).unwrap().as_str();
+    return String::from(mat);
+}
+
+fn parse(fname_inp: &String, fname_out: &String, id_set: HashSet<u64>) {
     let path_inp = Path::new(fname_inp);
     let file_inp = File::open(&path_inp).expect("Couldn't open input file");
     let bz2_reader = BzDecoder::new(file_inp);
@@ -40,24 +45,21 @@ fn parse(fname_inp: &String, fname_out: &String) {
 
     let mut total = 0;
     let mut hits = 0;
+    let mut title = String::new();
 
     let mut state = State::Null;
     let mut store = vec![];
 
-    // is there a leading tag?
-    lazy_static! {
-        static ref ISTAG: Regex = Regex::new(r" *<").unwrap(); // filter first since most lines are non-tags
-        static ref GETTAG: Regex = Regex::new(r" *<(/?[^ >]+)(?: |>)").unwrap();
-        static ref GETID: Regex = Regex::new(r" *<id>([^<]*)</id>").unwrap();
-    }
+    let istag: Regex = Regex::new(r" *<").unwrap(); // filter first since most lines are non-tags
+    let gettag: Regex = Regex::new(r" *<(/?[^ >]+)(?: |>)").unwrap();
+    let getid: Regex = Regex::new(r" *<id>([^<]*)</id>").unwrap();
+    let gettitle: Regex = Regex::new(r" *<title>([^<]*)</title>").unwrap();
 
     for (i, res) in buf_reader.lines().enumerate() {
-        let line = res.unwrap();
-        if ISTAG.is_match(&line) {
-            let ref line0 = &line.clone();
-            let cap = GETTAG.captures(line0).unwrap();
-            let tag = cap.get(1).unwrap().as_str();
-            match (state, tag) {
+        let mut line: String = res.unwrap();
+        if istag.is_match(&line) {
+            let tag = get_match(&gettag, &line);
+            match (state, tag.as_str()) {
                 (State::Null, "mediawiki") => {
                     state = State::Wiki;
                     writeln!(file_out, "{}", line).unwrap();
@@ -86,14 +88,14 @@ fn parse(fname_inp: &String, fname_out: &String) {
                 }
 
                 (State::Page, "title") => {
+                    title = get_match(&gettitle, &line);
                     store.push(line);
                 },
                 (State::Page, "ns") => {
                     store.push(line);
                 },
                 (State::Page, "id") => {
-                    let cap = GETID.captures(&line).unwrap();
-                    let sid = cap.get(1).unwrap().as_str();
+                    let sid = get_match(&getid, &line);
                     let id = sid.parse::<u64>().unwrap();
 
                     total += 1;
@@ -102,8 +104,9 @@ fn parse(fname_inp: &String, fname_out: &String) {
                         println!("articles {}, matches {}, id {}, time {}", total, hits, id, dur);
                     }
 
-                    if id == 2336430 {
+                    if id_set.contains(&id) {
                         state = State::Write;
+                        println!("{}", title);
                         for s in &mut store {
                             writeln!(file_out, "{}", s).unwrap();
                         }
@@ -142,10 +145,28 @@ fn parse(fname_inp: &String, fname_out: &String) {
     println!("{}", total);
 }
 
+// read in ids as a bool map
+fn readlist(path: &String) -> HashSet<u64> {
+    let mut rdr = csv::Reader::from_path(&path).unwrap();
+    let _ = rdr.headers().unwrap();
+
+    let mut ids: HashSet<u64> = HashSet::new();
+    for res in rdr.records() {
+        let rec = res.unwrap();
+        let txt = rec.get(0).unwrap();
+        let id = txt.parse::<u64>().unwrap();
+        ids.insert(id);
+    }
+
+	return ids;
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
     let fname_inp = &args[1];
     let fname_out = &args[2];
+    let fname_art = &args[3];
     println!("Parsing {} -> {}", fname_inp, fname_out);
-    parse(fname_inp, fname_out);
+    let id_set = readlist(fname_art);
+    parse(fname_inp, fname_out, id_set);
 }
